@@ -1,0 +1,61 @@
+name: Build Dopamine Rootful
+
+# Manual run: Actions tab > "Build Dopamine Rootful" > Run workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "Repo to build (owner/name)"
+        default: "ghh-jb/Dopamine_Rootful_V2.x"
+      ref:
+        description: "Branch, tag or commit"
+        default: "main"
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout source (with submodules)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.ref }}
+          submodules: recursive
+
+      - name: Select Xcode 15 (README says Xcode 14/15 only)
+        run: |
+          ls -d /Applications/Xcode_15*.app || { echo "No Xcode 15 on this runner"; ls /Applications | grep -i xcode; exit 1; }
+          XC=$(ls -d /Applications/Xcode_15*.app | sort -V | head -n1)
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+
+      - name: Install build tools
+        run: |
+          brew install ldid dpkg make xz wget
+          echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+
+      - name: Install Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+          curl -L https://github.com/theos/sdks/archive/refs/heads/master.tar.gz | tar -xz -C /tmp
+          cp -R /tmp/sdks-master/*.sdk "$HOME/theos/sdks/"
+
+      - name: Download bootstraps
+        working-directory: Application/Dopamine/Resources
+        run: |
+          chmod +x download_bootstraps.sh
+          ./download_bootstraps.sh
+
+      - name: Build (BaseBin, Packages, Application)
+        run: make
+
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: dopamine-rootful-build
+          if-no-files-found: error
+          path: |
+            Application/Dopamine.ipa
+            Application/Dopamine.tipa
+            BaseBin/basebin.tar
